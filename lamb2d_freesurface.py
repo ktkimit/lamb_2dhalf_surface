@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import scipy.optimize
+from scipy.integrate import quad
 import matplotlib.pyplot as plt
 
 
@@ -55,6 +56,131 @@ class Ricker(WaveSource):
         plt.xlabel("Time")
         plt.show()
 
+class Step3(WaveSource):
+    def __init__(self, green, magnitude=1.0, timesteps=(0.05,0.1,0.15)):
+        self.green = green
+        self.magnitude = magnitude
+        self.timesteps = timesteps
+
+    def evaluate(self, t):
+        if t <= self.timesteps[0]:
+            return self.magnitude
+        elif t <= self.timesteps[1]:
+            return -2.0*self.magnitude
+        elif t <= self.timesteps[2]:
+            return self.magnitude
+        else:
+            return 0.0
+
+    def evaluate_convolution(self, x, t, tt):
+        """
+        Evaluate F(tt)*green(t-tt)
+
+        :param x float: receiver's location
+        :param t float: time
+        :param tt float: integration variable
+        """
+        f = self.evaluate(tt)
+        if f == 0.0:
+            return (0.0, 0.0)
+        
+        bt = t - tt
+        u = self.green.evaluate(x, self.green.t2tau(x, bt))
+
+        return tuple(f*val for val in u)
+
+    def integration_convolution(self, x, t):
+        """
+        Integrate F(tt)*green(t-tt) dtt from 0 to t
+
+        :param x float: receiver's location
+        :param t float: time
+        """
+        if (self.green.t2tau(x,t)<1.0 and self.green.t2tau(x,t)<self.green.k):
+            return (0.0, 0.0)
+
+        tt_upper = self.timesteps[2]
+
+        t_one = self.green.tau2t(x, 1.0)
+        t_k = self.green.tau2t(x, self.green.k)
+        t_r = self.green.tau2t(x, self.green.zetar)
+
+        tt_one = t - t_one
+        tt_k = t - t_k
+        tt_r = t - t_r
+
+        points = list(self.timesteps)
+        points.append(tt_one)
+        points.append(tt_k)
+        points.append(tt_r)
+        points.sort()
+
+        points = np.array(points)
+        points = points[ (points>=0.0) * (points<=tt_upper) ]
+
+        fu = lambda tt: self.evaluate_convolution(x, t, tt)[0]
+        fw = lambda tt: self.evaluate_convolution(x, t, tt)[1]
+
+        u, u_err = quad(fu, 0.0, tt_upper, points=points)
+        if tt_r >= 0.0 and tt_r <= tt_upper:
+            u += self.evaluate(tt_r)*self.green.evaluate(x, self.green.zetar)[0]
+
+            fw_nosingular = lambda tt: fw(tt)*(tt - tt_r)
+            w1, w1_err = quad(fw_nosingular, 0.0, tt_k, weight='cauchy', wvar=tt_r)
+            
+            points = points[ (points>=tt_k) * (points<=tt_upper) ]
+            w2, w2_err = quad(fw, tt_k, tt_upper, points=points)
+
+            w = w1 + w2
+        else:
+            w, w_err = quad(fw, 0.0, tt_upper, points=points)
+
+        return (u, w)
+
+    def plot_response(self, x, tmax, nt):
+        t = np.linspace(0., tmax, num=nt)
+        uhist = np.zeros(t.size)
+        whist = np.zeros(t.size)
+        for i, time in enumerate(t):
+            (uhist[i], whist[i]) = self.integration_convolution(x, time)
+
+        fig, axs = plt.subplots(2, sharex=True)
+        axs[0].plot(t, uhist)
+        axs[1].plot(t, whist)
+
+        axs[0].set_ylabel(r'$u_x$')
+        axs[1].set_ylabel(r'$u_z$')
+        axs[1].set_xlabel(r'$time$')
+
+        plt.margins(x=0)
+        plt.show()
+
+    def plot_convolution(self, x, t, ntt):
+        """
+        Plot the colvolution of F(tt)*green(t-tt)
+
+        :param t float: time
+        :param ntt int: number of evaluation points
+        :param x float: receiver's location
+        """
+        tt = np.linspace(0., t, num=ntt)
+        u = np.zeros(tt.size)
+        w = np.zeros(tt.size)
+        for i, z in enumerate(tt):
+            (u[i], w[i]) = self.evaluate_convolution(x, t, z)
+
+        fig, axs = plt.subplots(2, sharex=True)
+        axs[0].plot(tt, u)
+        axs[1].plot(tt, w)
+
+        axs[0].set_ylabel(r'$u_x$')
+        axs[1].set_ylabel(r'$u_z$')
+        axs[1].set_xlabel(r'$\tt$')
+
+        plt.margins(x=0)
+        plt.show()
+       
+
 class GreenfunctionFreesurface(object):
 
     """Green's function on the free surface for a delta source located on x=0, z=0
@@ -93,6 +219,12 @@ class GreenfunctionFreesurface(object):
 
         tau = self.cd*t / x
         return tau
+
+    def tau2t(self, x, tau):
+        assert x > 0.0
+
+        t = tau*x / self.cd
+        return t
 
     def evaluate(self, x, tau):
         """TODO: Docstring for eval_nondim.
@@ -142,6 +274,11 @@ class GreenfunctionFreesurface(object):
             uz *= -coef
 
             return (ux, uz)
+
+    def evaluate_nosingular(self, x, tau):
+        (ux, uz) = self.evaluate(x, tau)
+        uz *= (tau - self.zetar)
+        return (ux, uz)
        
     def plotting(self, x, ntau, taumin, taumax):
         tau = np.linspace(taumin, taumax, num=ntau)
@@ -189,4 +326,5 @@ lmbda = young*nu / ((1. + nu) * (1. - 2.*nu))
 mu = young / (2.*(1.+nu))
 
 green = GreenfunctionFreesurface(rho, lmbda, mu)
+stepf = Step3(green, magnitude=1e6)
 
