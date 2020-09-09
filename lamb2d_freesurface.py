@@ -327,4 +327,6 @@ mu = young / (2.*(1.+nu))
 
 green = GreenfunctionFreesurface(rho, lmbda, mu)
 stepf = Step3(green, magnitude=1e6)
+stepf.plot_response(640., 1.0, 500)
+stepf.plot_response(1280., 1.0, 500)
 
