@@ -99,7 +99,7 @@ class Step3(WaveSource):
         if (self.green.t2tau(x,t)<1.0 and self.green.t2tau(x,t)<self.green.k):
             return (0.0, 0.0)
 
-        tt_upper = self.timesteps[2]
+        tt_upper = min(t, self.timesteps[2])
 
         t_one = self.green.tau2t(x, 1.0)
         t_k = self.green.tau2t(x, self.green.k)
@@ -123,7 +123,8 @@ class Step3(WaveSource):
 
         u, u_err = quad(fu, 0.0, tt_upper, points=points)
         if tt_r >= 0.0 and tt_r <= tt_upper:
-            u += self.evaluate(tt_r)*self.green.evaluate(x, self.green.zetar)[0]
+            u += self.evaluate(tt_r)*x/self.green.cd * \
+                    self.green.evaluate(x, self.green.zetar)[0]
 
             fw_nosingular = lambda tt: fw(tt)*(tt - tt_r)
             w1, w1_err = quad(fw_nosingular, 0.0, tt_k, weight='cauchy', wvar=tt_r)
@@ -154,6 +155,16 @@ class Step3(WaveSource):
 
         plt.margins(x=0)
         plt.show()
+
+    def write_result(self, x, tmax, nt):
+        t = np.linspace(0., tmax, num=nt)
+        uhist = np.zeros(t.size)
+        whist = np.zeros(t.size)
+        for i, time in enumerate(t):
+            (uhist[i], whist[i]) = self.integration_convolution(x, time)
+
+        y = np.vstack((uhist, whist))
+        np.savetxt('exact_' + str(int(x)) + '.dat', y.T, fmt='%1.4e')
 
     def plot_convolution(self, x, t, ntt):
         """
@@ -255,7 +266,7 @@ class GreenfunctionFreesurface(object):
             uz *= - coef
 
             # ux should be in fact infinite value
-            if tau == self.zetar:
+            if abs(tau - self.zetar) <= 1e-16:
                 G = 8.*(self.k2 - 1.) - 4.*self.k2*self.kr2**2 + self.k2*self.kr2**3
                 ux = - 2.*k3 * math.pi*(2. - self.kr2)**3 / (8.*G)
                 ux *= coef
@@ -326,7 +337,7 @@ lmbda = young*nu / ((1. + nu) * (1. - 2.*nu))
 mu = young / (2.*(1.+nu))
 
 green = GreenfunctionFreesurface(rho, lmbda, mu)
-stepf = Step3(green, magnitude=1e6)
+stepf = Step3(green, magnitude=2e6)
 stepf.plot_response(640., 1.0, 500)
 stepf.plot_response(1280., 1.0, 500)
 
