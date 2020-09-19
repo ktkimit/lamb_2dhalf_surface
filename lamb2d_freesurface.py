@@ -164,7 +164,7 @@ class Step3(WaveSource):
             (uhist[i], whist[i]) = self.integration_convolution(x, time)
 
         y = np.vstack((uhist, whist))
-        np.savetxt('exact_' + str(int(x)) + '.dat', y.T, fmt='%1.4e')
+        np.savetxt('exact_' + str(int(x)) + '.dat', y.T, fmt='% 1.4e')
 
     def plot_convolution(self, x, t, ntt):
         """
