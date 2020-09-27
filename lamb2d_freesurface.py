@@ -31,22 +31,110 @@ class WaveSource(object):
         raise NotImplementedError("Child class should define method plotting")
 
 class Ricker(WaveSource):
-    def __init__(self, a, freq, delay):
+    def __init__(self, green, a, freq, delay):
         """TODO: Docstring for __init__.
 
+        :param a: amplitude
         :param freq: peak frequency
         :param dealy: time delay
         :returns: TODO
 
         """
+        self.green = green
         self.a = a
         self.freq = freq
         self.delay = delay
-        
+
     def evaluate(self, t):
         x = np.pi*self.freq*(t - self.delay)
         x2 = x**2
         return self.a*(1.0 - 2.0*x2) * np.exp(-x2)
+
+    def evaluate_convolution(self, x, t, tt):
+        """
+        Evaluate F(tt)*green(t-tt)
+
+        :param x float: receiver's location
+        :param t float: time
+        :param tt float: integration variable
+        """
+        f = self.evaluate(tt)
+        if f == 0.0:
+            return (0.0, 0.0)
+
+        bt = t - tt
+        u = self.green.evaluate(x, self.green.t2tau(x, bt))
+
+        return tuple(f*val for val in u)
+
+    def integration_convolution(self, x, t):
+        """
+        integrate f(tt)*green(t-tt) dtt from 0 to t
+
+        :param x float: receiver's location
+        :param t float: time
+        """
+        if (self.green.t2tau(x,t)<1.0 and self.green.t2tau(x,t)<self.green.k):
+            return (0.0, 0.0)
+
+        tt_upper = t
+
+        t_one = self.green.tau2t(x, 1.0)
+        t_k = self.green.tau2t(x, self.green.k)
+        t_r = self.green.tau2t(x, self.green.zetar)
+
+        tt_one = t - t_one
+        tt_k = t - t_k
+        tt_r = t - t_r
+
+        points = list()
+        points.append(tt_one)
+        points.append(tt_k)
+        points.append(tt_r)
+        points.sort()
+
+        points = np.array(points)
+        points = points[ (points>=0.0) * (points<=tt_upper) ]
+
+        fu = lambda tt: self.evaluate_convolution(x, t, tt)[0]
+        fw = lambda tt: self.evaluate_convolution(x, t, tt)[1]
+
+        u, u_err = quad(fu, 0.0, tt_upper, points=points)
+        if tt_r >= 0.0 and tt_r <= tt_upper:
+            u += self.evaluate(tt_r)*x/self.green.cd * \
+                    self.green.evaluate(x, self.green.zetar)[0]
+
+            fw_nosingular = lambda tt: fw(tt)*(tt - tt_r)
+            w1, w1_err = quad(fw_nosingular, 0.0, tt_k, weight='cauchy', wvar=tt_r)
+
+            points = points[ (points>=tt_k) * (points<=tt_upper) ]
+            w2, w2_err = quad(fw, tt_k, tt_upper, points=points)
+
+            w = w1 + w2
+        else:
+            w, w_err = quad(fw, 0.0, tt_upper, points=points)
+
+        return (u, w)
+
+    def plot_response(self, x, tmax, nt):
+        t = np.linspace(0., tmax, num=nt)
+        uhist = np.zeros(t.size)
+        whist = np.zeros(t.size)
+        for i, time in enumerate(t):
+            (uhist[i], whist[i]) = self.integration_convolution(x, time)
+
+        fig, axs = plt.subplots(2, sharex=True)
+        axs[0].plot(t, uhist)
+        axs[1].plot(t, whist)
+
+        axs[0].set_ylabel(r'$u_x$')
+        axs[1].set_ylabel(r'$u_z$')
+        axs[1].set_xlabel(r'$time$')
+
+        axs[1].legend(['receiver at {0:.1f}'.format(x)])
+
+        plt.margins(x=0)
+        plt.show()
 
     def plotting(self, nt, tmax):
         t = np.linspace(0., tmax, num=nt)
@@ -83,7 +171,7 @@ class Step3(WaveSource):
         f = self.evaluate(tt)
         if f == 0.0:
             return (0.0, 0.0)
-        
+
         bt = t - tt
         u = self.green.evaluate(x, self.green.t2tau(x, bt))
 
@@ -91,7 +179,7 @@ class Step3(WaveSource):
 
     def integration_convolution(self, x, t):
         """
-        Integrate F(tt)*green(t-tt) dtt from 0 to t
+        integrate f(tt)*green(t-tt) dtt from 0 to t
 
         :param x float: receiver's location
         :param t float: time
@@ -128,7 +216,7 @@ class Step3(WaveSource):
 
             fw_nosingular = lambda tt: fw(tt)*(tt - tt_r)
             w1, w1_err = quad(fw_nosingular, 0.0, tt_k, weight='cauchy', wvar=tt_r)
-            
+
             points = points[ (points>=tt_k) * (points<=tt_upper) ]
             w2, w2_err = quad(fw, tt_k, tt_upper, points=points)
 
@@ -152,6 +240,8 @@ class Step3(WaveSource):
         axs[0].set_ylabel(r'$u_x$')
         axs[1].set_ylabel(r'$u_z$')
         axs[1].set_xlabel(r'$time$')
+
+        axs[1].legend(['receiver at {0:.1f}'.format(x)])
 
         plt.margins(x=0)
         plt.show()
@@ -190,7 +280,7 @@ class Step3(WaveSource):
 
         plt.margins(x=0)
         plt.show()
-       
+
 
 class GreenfunctionFreesurface(object):
 
@@ -205,8 +295,8 @@ class GreenfunctionFreesurface(object):
         """TODO: to be defined.
 
         :param rho: density
-        :param lmbda: Lamé's first parameter 
-        :param mu: Lamé's second parameter 
+        :param lmbda: Lamé's first parameter
+        :param mu: Lamé's second parameter
 
         """
         self.cs = math.sqrt( mu / rho )
@@ -290,7 +380,7 @@ class GreenfunctionFreesurface(object):
         (ux, uz) = self.evaluate(x, tau)
         uz *= (tau - self.zetar)
         return (ux, uz)
-       
+
     def plotting(self, x, ntau, taumin, taumax):
         tau = np.linspace(taumin, taumax, num=ntau)
 
@@ -324,8 +414,8 @@ class GreenfunctionFreesurface(object):
                 - 16.*(1. - 1. / self.k2)
         y = scipy.optimize.brentq(f, 0., 1.)
         return y
-        
-        
+
+
 # Young's modulus 
 young = 1.877303655819164e10
 # Poisson's ratio 
@@ -337,6 +427,14 @@ lmbda = young*nu / ((1. + nu) * (1. - 2.*nu))
 mu = young / (2.*(1.+nu))
 
 green = GreenfunctionFreesurface(rho, lmbda, mu)
+
+# Ricker wavelet
+ricker = Ricker(green, 2.0e6, 10, 0.1)
+ricker.plot_response(640., 1.0, 500)
+ricker.plot_response(1280., 1.0, 500)
+
+
+# 3 step loading
 stepf = Step3(green, magnitude=2e6)
 stepf.plot_response(640., 1.0, 500)
 stepf.plot_response(1280., 1.0, 500)
