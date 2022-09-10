@@ -9,3 +9,9 @@ Two line forces are considered, a Ricker wavelet and Heaviside step loading.
 This code is expected to be used as an analytical solution to verify numerical
 solutions computed by, for example, finite element methods with direct time
 integration scheme.
+
+#### Requirements
+- Python 3
+- Numpy
+- Scipy
+- Matplotlib
